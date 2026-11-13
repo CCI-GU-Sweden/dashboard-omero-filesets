@@ -14,4 +14,4 @@ license = "MIT"
 include = ["omero_filesets*"]
 
 [tool.setuptools.package-data]
-omero_filesets = ["templates/*.html", "static/js/*.js"]
+omero_filesets = ["templates/*.html", "static/js/*.js", "schema/*.sql"]

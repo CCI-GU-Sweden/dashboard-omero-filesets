@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: omero-filesets-collector
+spec:
+  schedule: "0 7 * * 1-5"
+  timeZone: Europe/Stockholm
+  suspend: true
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: collector
+              image: REPLACE_WITH_REVIEWED_COLLECTOR_IMAGE_DIGEST
+              env:
+                - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
+                - {name: DRY_RUN, value: "true"}
+                - {name: OMERO_DB_HOST, value: REPLACE_WITH_OMERO_DATABASE_HOST}
+                - {name: OMERO_DB_PORT, value: "5432"}
+                - {name: OMERO_DB_NAME, value: omerodb}
+                - name: OMERO_DB_USER
+                  valueFrom: {secretKeyRef: {name: omero-filesets-source, key: username}}
+                - name: OMERO_DB_PASSWORD
+                  valueFrom: {secretKeyRef: {name: omero-filesets-source, key: password}}
+                - {name: STATS_DB_HOST, value: REPLACE_WITH_STATS_DATABASE_HOST}
+                - {name: STATS_DB_PORT, value: "5432"}
+                - {name: STATS_DB_NAME, value: REPLACE_WITH_STATS_DATABASE}
+                - name: STATS_DB_USER
+                  valueFrom: {secretKeyRef: {name: omero-filesets-destination, key: username}}
+                - name: STATS_DB_PASSWORD
+                  valueFrom: {secretKeyRef: {name: omero-filesets-destination, key: password}}
+              resources:
+                requests: {cpu: 100m, memory: 256Mi}
+                limits: {cpu: "1", memory: 1Gi}
