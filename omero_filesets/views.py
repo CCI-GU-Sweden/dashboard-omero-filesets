@@ -6,6 +6,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from accounts.models import AuditEvent, User, VerifiedOmeroGroup
 from accounts.permissions import operational_access, researcher_access, is_dashboard_admin
+from .context import billing_enabled
 
 
 def storage_scope(user):
@@ -94,7 +95,7 @@ def storage_history(request):
         return JsonResponse({'error': 'A verified OMERO group is required.'}, status=403)
     from omero_filesets.data import history, InvalidStorageFilters
     try:
-        return JsonResponse(history(request.GET, group, is_dashboard_admin(request.user)))
+        return JsonResponse(history(request.GET, group, is_dashboard_admin(request.user), include_billing=billing_enabled()))
     except InvalidStorageFilters:
         return JsonResponse({'error': 'Invalid history filters.'}, status=400)
     except DatabaseError:
@@ -107,7 +108,7 @@ def storage_overview(request):
         return JsonResponse({'error': 'Staff access required.'}, status=403)
     from omero_filesets.data import snapshot_overview
     try:
-        return JsonResponse(snapshot_overview(is_dashboard_admin(request.user)))
+        return JsonResponse(snapshot_overview(is_dashboard_admin(request.user), include_billing=billing_enabled()))
     except DatabaseError:
         return JsonResponse({'error': 'Storage summary is currently unavailable.'}, status=503)
 
@@ -119,13 +120,15 @@ def storage_overview_card(request):
         return JsonResponse({'error': 'A verified OMERO group is required.'}, status=403)
     from omero_filesets.data import overview_card
     try:
-        return JsonResponse(overview_card(allowed_group=group, include_billable=operational_access(request.user)))
+        return JsonResponse(overview_card(allowed_group=group, include_billable=billing_enabled() and operational_access(request.user)))
     except DatabaseError:
         return JsonResponse({'error': 'Storage summary is currently unavailable.'}, status=503)
 
 
 @require_GET
 def storage_admin_data(request, kind):
+    if kind == 'policies' and not billing_enabled():
+        return JsonResponse({'error': 'Not found.'}, status=404)
     if not is_dashboard_admin(request.user):
         return JsonResponse({'error': 'Administrator access required.'}, status=403)
     if kind not in ('policies', 'health'):
@@ -139,6 +142,8 @@ def storage_admin_data(request, kind):
 
 @require_GET
 def storage_email_draft(request, group_id):
+    if not billing_enabled():
+        return JsonResponse({'error': 'Not found.'}, status=404)
     if not is_dashboard_admin(request.user):
         return JsonResponse({'error': 'Administrator access required.'}, status=403)
     if not 1 <= group_id <= 9223372036854775807:
@@ -161,6 +166,8 @@ def create_storage_policy(request):
     import re
     from datetime import date, timedelta
     from django.utils import timezone
+    if not billing_enabled():
+        return JsonResponse({'error': 'Not found.'}, status=404)
     if not is_dashboard_admin(request.user):
         return JsonResponse({'error': 'Administrator access required.'}, status=403)
     try:
@@ -206,6 +213,9 @@ def create_storage_policy(request):
 
 @login_required
 def billing(request):
+    if not billing_enabled():
+        from django.http import Http404
+        raise Http404
     if not is_dashboard_admin(request.user):
         return HttpResponseForbidden('Administrator access required.')
     return render(request, 'billing.html')
@@ -213,6 +223,8 @@ def billing(request):
 
 @require_GET
 def billing_summary(request):
+    if not billing_enabled():
+        return JsonResponse({'error': 'Not found.'}, status=404)
     researcher = researcher_access(request.user)
     if not is_dashboard_admin(request.user) and not researcher:
         return JsonResponse({'error': 'Administrator access required.'}, status=403)

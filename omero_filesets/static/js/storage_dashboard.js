@@ -17,7 +17,9 @@
       const dates = data.history.map(row => row.date);
       const series = (key, name, color) => ({type: 'scatter', mode: 'lines', name, x: dates, y: data.history.map(row => row[key]), line: {color, width: 2}, fill: 'tozeroy', fillcolor: color === '#3273dc' ? 'rgba(50,115,220,.12)' : 'rgba(35,209,160,.12)', hovertemplate: '%{x}<br>%{y:.2f}<extra>%{fullData.name}</extra>'});
       const theme = layout();
-      await Plotly.react('omeroChart', [series('total', 'Total', '#3273dc'), series('billable', 'Billable', '#23d1a0')], {...theme, margin: {l: 85, r: 25, t: 25, b: 80}, xaxis: {...theme.xaxis, title: {text: 'Date'}, automargin: true}, yaxis: {...theme.yaxis, title: {text: data.metric === 'ore' ? 'Daily charge (öre)' : 'Storage (GB)'}, rangemode: 'tozero', automargin: true}}, plotConfig);
+      const traces = [series('total', 'Total', '#3273dc')];
+      if (data.history.some(row => Object.hasOwn(row, 'billable'))) traces.push(series('billable', 'Billable', '#23d1a0'));
+      await Plotly.react('omeroChart', traces, {...theme, margin: {l: 85, r: 25, t: 25, b: 80}, xaxis: {...theme.xaxis, title: {text: 'Date'}, automargin: true}, yaxis: {...theme.yaxis, title: {text: data.metric === 'ore' ? 'Daily charge (öre)' : 'Storage (GB)'}, rangemode: 'tozero', automargin: true}}, plotConfig);
       $('history-status').textContent = data.history.length ? '' : 'No storage snapshots for this period.';
     } catch (error) {$('history-status').textContent = error.message;}
   }
@@ -26,11 +28,13 @@
   history();
 
   let groups = [];
+  let billingEnabled = true;
   async function ranking() {
     const selected = groups.slice(0, Number($('ranking-limit').value)).reverse();
     const trace = (key, name, color) => ({type: 'bar', orientation: 'h', name, x: selected.map(g => g[key]), y: selected.map(g => g.name || g.id), customdata: selected.map(g => g.id), marker: {color}, hovertemplate: '%{y}<br>%{x:.2f} GB<extra>%{fullData.name}</extra>'});
     const theme = layout();
-    await Plotly.react('groupRankingChart', [trace('billable', 'Billable', '#3273dc'), trace('free', 'Free', '#23d1a0')], {...theme, height: Math.max(350, selected.length * 28 + 100), barmode: 'stack', margin: {l: 180, r: 25, t: 20, b: 60}, xaxis: {...theme.xaxis, title: 'Storage (GB)'}}, plotConfig);
+    const traces = billingEnabled ? [trace('billable', 'Billable', '#3273dc'), trace('free', 'Free', '#23d1a0')] : [trace('total', 'Total', '#3273dc')];
+    await Plotly.react('groupRankingChart', traces, {...theme, height: Math.max(350, selected.length * 28 + 100), barmode: 'stack', margin: {l: 180, r: 25, t: 20, b: 60}, xaxis: {...theme.xaxis, title: 'Storage (GB)'}}, plotConfig);
     const chart = $('groupRankingChart');
     chart.removeAllListeners('plotly_click');
     chart.on('plotly_click', event => {
@@ -43,6 +47,7 @@
     $('ranking-limit').addEventListener('change', ranking);
     get('/api/omero/overview').then(data => {
       document.querySelectorAll('[data-metric]').forEach(el => {el.textContent = Number(data.metrics[el.dataset.metric] || 0).toLocaleString(undefined, {maximumFractionDigits: 2});});
+      billingEnabled = data.billing_enabled !== false;
       groups = data.groups; return ranking();
     }).catch(() => {$('groupRankingChart').textContent = 'Storage summary is currently unavailable.';});
     get('/api/omero/groups').then(data => {for (const group of data.groups) {const option = document.createElement('option'); option.value = group.id; option.textContent = group.name || group.id; $('history-group').append(option);}}).catch(() => {});

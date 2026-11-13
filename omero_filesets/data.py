@@ -127,12 +127,12 @@ def list_billing(params, allowed_groups=None):
     ]}
 
 
-def history(params, allowed_group=None, is_admin=False):
+def history(params, allowed_group=None, is_admin=False, include_billing=True):
     period = params.get('period', '30')
     metric = params.get('metric', 'bytes')
     group = params.get('group_id', 'all')
     try:
-        if metric not in (('bytes', 'ore') if is_admin else ('bytes',)):
+        if metric not in (('bytes', 'ore') if is_admin and include_billing else ('bytes',)):
             raise ValueError
         if group != 'all' and (not group.isdecimal() or not 1 <= int(group) <= 9223372036854775807):
             raise ValueError
@@ -158,13 +158,25 @@ def history(params, allowed_group=None, is_admin=False):
         values.append(int(group))
     total = 'SUM(total_bytes)::numeric / 1000000000' if metric == 'bytes' else 'SUM(total_bytes::numeric * rate_ore_per_gb_day / 1000000000)'
     billable = 'SUM(billable_bytes)::numeric / 1000000000' if metric == 'bytes' else 'SUM(daily_charge_ore)'
+    billing_column = f', {billable}' if include_billing else ''
     with connection.cursor() as cursor:
-        cursor.execute(f'SELECT snapshot_date, {total}, {billable} FROM public.group_storage_snapshot WHERE ' + ' AND '.join(conditions) + ' GROUP BY snapshot_date ORDER BY snapshot_date', values)
+        cursor.execute(f'SELECT snapshot_date, {total}{billing_column} FROM public.group_storage_snapshot WHERE ' + ' AND '.join(conditions) + ' GROUP BY snapshot_date ORDER BY snapshot_date', values)
         rows = cursor.fetchall()
-    return {'metric': metric, 'history': [{'date': row[0].isoformat(), 'total': float(row[1] or 0), 'billable': float(row[2] or 0)} for row in rows]}
+    return {'metric': metric, 'history': [dict({'date': row[0].isoformat(), 'total': float(row[1] or 0)}, **({'billable': float(row[2] or 0)} if include_billing else {})) for row in rows]}
 
 
-def snapshot_overview(is_admin=False):
+def snapshot_overview(is_admin=False, include_billing=True):
+    if not include_billing:
+        with connection.cursor() as cursor:
+            cursor.execute('''SELECT SUM(fileset_count), SUM(total_bytes)::numeric / 1000000000
+                FROM public.group_storage_snapshot WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM public.group_storage_snapshot)''')
+            row = cursor.fetchone()
+            cursor.execute('''SELECT group_id, group_name, total_bytes::numeric / 1000000000
+                FROM public.group_storage_snapshot WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM public.group_storage_snapshot)
+                ORDER BY total_bytes DESC, group_name LIMIT 50''')
+            groups = cursor.fetchall()
+        return {'metrics': {'filesets': float(row[0] or 0), 'storage_gb': float(row[1] or 0)},
+                'groups': [{'id': str(g[0]), 'name': g[1], 'total': float(g[2] or 0)} for g in groups], 'billing_enabled': False}
     with connection.cursor() as cursor:
         cursor.execute('''SELECT SUM(fileset_count), SUM(billable_fileset_count),
             SUM(total_bytes)::numeric / 1000000000,
